@@ -13,8 +13,9 @@ export const metadata = {
 }
 
 const logo = (
-  <span style={{ fontWeight: 800, fontSize: '1.2rem' }}>
-    🧠 Unforget
+  <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 800, fontSize: '1.2rem' }}>
+    <img src="/logo.png" alt="" style={{ height: '1.6rem' }} />
+    Unforget
   </span>
 )
 
