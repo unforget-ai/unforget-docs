@@ -2,6 +2,11 @@
   --primary-hue: 210;
 }
 
+.dark {
+  --nextra-bg: #0B0D14;
+  background-color: #0B0D14;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     sans-serif;
