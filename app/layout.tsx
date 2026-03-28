@@ -58,6 +58,7 @@ export default async function RootLayout({
             title: 'On this page',
             backToTop: true,
           }}
+          nextThemes={{ defaultTheme: 'dark' }}
         >
           {children}
         </Layout>
