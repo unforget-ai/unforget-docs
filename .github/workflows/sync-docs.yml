@@ -23,24 +23,14 @@ jobs:
           path: _unforget_source
           sparse-checkout: |
             src/unforget
-            scripts/generate_api_docs.py
             README.md
             CHANGELOG.md
             pyproject.toml
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Generate API reference docs
-        run: |
-          python _unforget_source/scripts/generate_api_docs.py \
-            --out app/docs/api-reference/generated
-
       - name: Sync changelog
         run: |
           if [ -f _unforget_source/CHANGELOG.md ]; then
+            # Convert CHANGELOG.md to MDX with frontmatter comment
             echo '{/* Auto-synced from unforget repo — do not edit manually */}' > app/docs/changelog/page.mdx
             echo '' >> app/docs/changelog/page.mdx
             cat _unforget_source/CHANGELOG.md >> app/docs/changelog/page.mdx
@@ -71,5 +61,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "docs: auto-sync API reference and changelog from unforget source"
+          git commit -m "docs: auto-sync changelog from unforget source"
           git push
