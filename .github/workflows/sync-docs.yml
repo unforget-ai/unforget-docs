@@ -1,0 +1,65 @@
+name: Sync docs from unforget repo
+
+on:
+  workflow_dispatch:
+
+  repository_dispatch:
+    types: [docs-update]
+
+  schedule:
+    - cron: '0 6 * * *'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout docs repo
+        uses: actions/checkout@v4
+
+      - name: Checkout unforget source
+        uses: actions/checkout@v4
+        with:
+          repository: unforget-ai/unforget
+          path: _unforget_source
+          sparse-checkout: |
+            src/unforget
+            README.md
+            CHANGELOG.md
+            pyproject.toml
+
+      - name: Sync changelog
+        run: |
+          if [ -f _unforget_source/CHANGELOG.md ]; then
+            # Convert CHANGELOG.md to MDX with frontmatter comment
+            echo '{/* Auto-synced from unforget repo — do not edit manually */}' > app/docs/changelog/page.mdx
+            echo '' >> app/docs/changelog/page.mdx
+            cat _unforget_source/CHANGELOG.md >> app/docs/changelog/page.mdx
+          fi
+
+      - name: Sync version badge
+        run: |
+          VERSION=$(grep -oP 'version = "\K[^"]+' _unforget_source/pyproject.toml | head -1)
+          if [ -n "$VERSION" ]; then
+            echo "Current version: $VERSION"
+          fi
+
+      - name: Clean up
+        run: rm -rf _unforget_source
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs: auto-sync changelog from unforget source"
+          git push

@@ -1,0 +1,51 @@
+# Performance Tips
+
+## Connection pooling
+
+Use `pool_min_size` and `pool_max_size` to match your workload:
+
+```python
+store = MemoryStore(
+    "postgresql://...",
+    pool_min_size=2,
+    pool_max_size=20,
+)
+```
+
+## HNSW tuning
+
+Increase `ef_search` for better recall at the cost of latency:
+
+```python
+store = MemoryStore("postgresql://...", ef_search=200)
+```
+
+## Reranker
+
+Disable with `reranker_enabled=False` to save ~10ms per recall if precision is acceptable:
+
+```python
+store = MemoryStore("postgresql://...", reranker_enabled=False)
+```
+
+## ONNX Runtime
+
+Install `onnxruntime` for 2-3x faster embeddings vs PyTorch:
+
+```bash
+pip install onnxruntime
+```
+
+Unforget auto-detects ONNX and uses it when available.
+
+## Consolidation scheduling
+
+Run during low-traffic periods to avoid competing for database connections:
+
+```python
+scheduler = ConsolidationScheduler(
+    store,
+    interval_seconds=3600 * 4,  # every 4 hours
+    write_threshold=200,
+)
+```

@@ -1,0 +1,32 @@
+# ScopedMemory
+
+A convenience wrapper that pre-binds `org_id` and `agent_id` so you don't repeat them on every call.
+
+## Usage
+
+```python
+store = MemoryStore("postgresql://...")
+await store.initialize()
+
+# Bind once
+memory = store.bind(org_id="acme", agent_id="support-bot")
+
+# All methods work without org_id/agent_id
+await memory.write("User prefers email over Slack")
+results = await memory.recall("communication preferences")
+all_mems = await memory.list()
+await memory.forget(some_id)
+count = await memory.forget_all()
+```
+
+## Available methods
+
+All `MemoryStore` methods are available with `org_id`/`agent_id` pre-filled:
+
+- `write()`, `write_batch()`
+- `recall()`, `auto_recall()`
+- `list()`, `get()`
+- `update()`, `forget()`, `forget_all()`
+- `supersede()`, `timeline()`, `history()`
+- `ingest()`
+- `stats()`

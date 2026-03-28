@@ -1,0 +1,54 @@
+# Installation
+
+## Install the package
+
+```bash
+pip install unforget
+```
+
+### Optional extras
+
+```bash
+pip install unforget[openai]      # OpenAI SDK integration
+pip install unforget[anthropic]   # Anthropic SDK integration
+pip install unforget[api]         # FastAPI REST router
+pip install unforget[spacy]       # Better entity extraction
+```
+
+## Start PostgreSQL with pgvector
+
+The easiest way is Docker:
+
+```yaml filename="docker-compose.yml"
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: unforget
+      POSTGRES_PASSWORD: unforget
+      POSTGRES_DB: unforget
+    ports:
+      - "5433:5432"
+    volumes:
+      - unforget-data:/var/lib/postgresql/data
+
+volumes:
+  unforget-data:
+```
+
+```bash
+docker compose up -d
+```
+
+## Verify
+
+```python
+from unforget import MemoryStore
+
+store = MemoryStore("postgresql://unforget:unforget@localhost:5433/unforget")
+await store.initialize()
+print("Connected!")
+await store.close()
+```
+
+`initialize()` creates the schema, indexes, and preloads embedding models automatically.

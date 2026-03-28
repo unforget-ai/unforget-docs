@@ -1,0 +1,75 @@
+# Retrieval
+
+Unforget uses a 4-channel hybrid retrieval system that runs in a single SQL query.
+
+## Channels
+
+| Channel | Index | What it finds | Default weight |
+|---------|-------|--------------|----------------|
+| **Semantic** | HNSW (pgvector) | Cosine similarity on embeddings | 1.0 |
+| **BM25** | GIN (tsvector) | Full-text keyword match with stemming | 0.8 |
+| **Entity** | GIN (text[]) | Named entity overlap | 0.6 |
+| **Temporal** | B-tree | Recently accessed memories | 0.4 |
+
+All 4 channels run in parallel inside one SQL query using CTEs.
+
+## Reciprocal Rank Fusion (RRF)
+
+Results from all channels are fused using RRF:
+
+```
+score = Σ (weight_c / (k + rank_c))
+```
+
+Where `k=60` (configurable) controls how much top ranks dominate.
+
+## Type boosts
+
+After fusion, scores are multiplied by type boosts:
+
+- `insight` × 1.5
+- `event` × 1.0
+- `raw` × 0.5
+
+## Reranking
+
+Optional cross-encoder reranking with `ms-marco-MiniLM-L-6-v2` adds ~10ms but significantly improves precision for ambiguous queries.
+
+## Usage
+
+```python
+# Basic recall
+results = await memory.recall("user preferences", limit=10)
+
+# With options
+results = await memory.recall(
+    "deploy issues",
+    limit=5,
+    memory_type="event",      # filter by type
+    include_shared=True,       # include shared memories
+    threshold=0.1,             # minimum score
+    rerank=True,               # enable cross-encoder
+)
+
+# Auto-recall formatted for system prompts
+context = await memory.auto_recall(
+    "What does the user prefer?",
+    max_tokens=2000,
+    limit=10,
+)
+# Returns: "[Memory Context]\n- User prefers dark mode\n- ..."
+```
+
+## Tuning weights
+
+```python
+store = MemoryStore(
+    "postgresql://...",
+    channel_weights={
+        "semantic": 1.0,    # emphasize meaning
+        "bm25": 0.5,        # reduce keyword matching
+        "entity": 0.8,      # boost entity overlap
+        "temporal": 0.2,    # reduce recency bias
+    },
+)
+```

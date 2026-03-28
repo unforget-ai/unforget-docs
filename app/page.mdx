@@ -1,0 +1,65 @@
+<div style={{ textAlign: 'center', padding: '4rem 1rem 2rem' }}>
+
+<div style={{ fontSize: '4rem', marginBottom: '0.5rem' }}>🧠</div>
+
+# Unforget
+
+<p style={{ fontSize: '1.4rem', color: '#94a3b8', maxWidth: '600px', margin: '0 auto 2rem' }}>
+  Fast, self-hosted memory for AI agents.
+  Zero-LLM writes. PostgreSQL + pgvector.
+</p>
+
+<div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap', marginBottom: '2rem' }}>
+  <code style={{ padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '1.1rem' }}>pip install unforget</code>
+</div>
+
+<div style={{ display: 'flex', gap: '2rem', justifyContent: 'center', flexWrap: 'wrap', fontSize: '0.95rem', color: '#94a3b8' }}>
+  <span><strong style={{ color: '#60a5fa' }}>~7ms</strong> writes</span>
+  <span><strong style={{ color: '#60a5fa' }}>~25ms</strong> recall</span>
+  <span><strong style={{ color: '#60a5fa' }}>0</strong> LLM calls on write</span>
+  <span><strong style={{ color: '#60a5fa' }}>4</strong> retrieval channels</span>
+</div>
+
+</div>
+
+---
+
+## Quick Start
+
+```python
+from unforget import MemoryStore
+
+store = MemoryStore("postgresql://user:pass@localhost/db")
+await store.initialize()
+
+memory = store.bind(org_id="acme", agent_id="support-bot")
+
+# Write — instant, no LLM
+await memory.write("User prefers dark mode", tags=["preference"])
+
+# Recall — 4-channel hybrid search
+results = await memory.recall("user preferences", limit=5)
+for r in results:
+    print(f"{r.content} (score: {r.score:.3f})")
+```
+
+---
+
+## Why Unforget?
+
+| | |
+|---|---|
+| **~7ms writes** | Zero LLM calls on the write path. Embed + insert, done. |
+| **~25ms recall** | Semantic + BM25 + entity + temporal search, fused with RRF. |
+| **Self-hosted** | PostgreSQL + pgvector. No cloud vendor, no vector DB dependency. |
+| **Background consolidation** | Dedup, decay, and LLM promotion while agents sleep. |
+| **Drop-in wrappers** | `wrap_openai()` and `wrap_anthropic()` — memory in one line. |
+| **Apache 2.0** | Open source, no vendor lock-in. |
+
+---
+
+<div style={{ textAlign: 'center', padding: '2rem 0' }}>
+  <a href="/docs/getting-started/installation" style={{ fontSize: '1.2rem', fontWeight: 600 }}>Get Started →</a>
+  {' · '}
+  <a href="https://github.com/unforget-ai/unforget" style={{ fontSize: '1.2rem', fontWeight: 600 }}>GitHub →</a>
+</div>

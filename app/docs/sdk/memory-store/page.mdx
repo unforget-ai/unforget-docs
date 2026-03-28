@@ -1,0 +1,158 @@
+# MemoryStore
+
+The core class. Manages connections, embeddings, and all memory operations.
+
+## Constructor
+
+```python
+store = MemoryStore(
+    database_url: str,
+    embedder: BaseEmbedder | None = None,
+    embedding_model: str = "all-MiniLM-L6-v2",
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    reranker_enabled: bool = True,
+    pool_min_size: int = 1,
+    pool_max_size: int = 10,
+    max_writes_per_minute: int = 100,
+    max_memories_per_agent: int = 10_000,
+    ...
+)
+```
+
+## Lifecycle
+
+```python
+await store.initialize()   # connect, create schema, preload models
+await store.close()         # close pool, stop scheduler
+```
+
+## Write
+
+```python
+item = await store.write(
+    content: str,
+    org_id: str,
+    agent_id: str,
+    memory_type: str = "insight",   # "insight" | "event" | "raw"
+    tags: list[str] | None = None,
+    importance: float = 0.5,        # 0.0 - 1.0
+    shared: bool = False,
+    immutable: bool = False,
+    expires_at: datetime | None = None,
+) -> MemoryItem
+```
+
+## Write batch
+
+```python
+from unforget import WriteItem
+
+items = await store.write_batch(
+    items=[
+        WriteItem(content="Fact 1", tags=["a"]),
+        WriteItem(content="Fact 2", importance=0.9),
+    ],
+    org_id="acme",
+    agent_id="bot",
+) -> list[MemoryItem]
+```
+
+## Recall
+
+```python
+results = await store.recall(
+    query: str,
+    org_id: str,
+    agent_id: str,
+    limit: int = 10,
+    memory_type: str | None = None,
+    include_shared: bool = True,
+    threshold: float = 0.0,
+    rerank: bool = True,
+    use_cache: bool = True,
+) -> list[MemoryResult]
+```
+
+## Auto-recall
+
+Formatted string for system prompt injection:
+
+```python
+context = await store.auto_recall(
+    query: str,
+    org_id: str,
+    agent_id: str,
+    max_tokens: int = 2000,
+    limit: int = 10,
+) -> str
+```
+
+## List
+
+```python
+memories = await store.list(
+    org_id: str,
+    agent_id: str,
+    memory_type: str | None = None,
+    tags: list[str] | None = None,
+    search: str | None = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    page: int = 1,
+    page_size: int = 100,
+) -> list[MemoryItem]
+```
+
+## Get / Update / Delete
+
+```python
+item = await store.get(memory_id: UUID) -> MemoryItem | None
+
+item = await store.update(
+    memory_id: UUID,
+    content: str | None = None,
+    tags: list[str] | None = None,
+    importance: float | None = None,
+) -> MemoryItem | None
+
+deleted = await store.forget(memory_id: UUID) -> bool
+
+count = await store.forget_all(org_id: str, agent_id: str) -> int
+```
+
+## Supersede
+
+```python
+old, new = await store.supersede(
+    old_id: UUID,
+    new_content: str,
+    org_id: str,
+    agent_id: str,
+) -> tuple[MemoryItem, MemoryItem]
+```
+
+## Timeline / History / Stats
+
+```python
+memories = await store.timeline(org_id, agent_id, at=datetime, limit=50)
+history = await store.history(memory_id)
+stats = await store.stats(org_id, agent_id) -> MemoryStats
+```
+
+## Ingest
+
+```python
+items = await store.ingest(
+    messages: list[dict],       # [{"role": "user", "content": "..."}]
+    org_id: str,
+    agent_id: str,
+    mode: str = "background",   # "background" | "immediate" | "lightweight"
+    llm: Callable | None = None,
+) -> list[MemoryItem]
+```
+
+## Bind
+
+```python
+memory = store.bind(org_id="acme", agent_id="bot") -> ScopedMemory
+```

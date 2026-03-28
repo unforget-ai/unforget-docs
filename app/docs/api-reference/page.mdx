@@ -1,0 +1,25 @@
+# REST API
+
+Mount a FastAPI router with 17 endpoints for HTTP access to all memory operations.
+
+## Setup
+
+```bash
+pip install unforget[api]
+```
+
+```python
+from fastapi import FastAPI
+from unforget import MemoryStore
+from unforget.api import create_memory_router
+
+app = FastAPI()
+store = MemoryStore("postgresql://...")
+
+@app.on_event("startup")
+async def startup():
+    await store.initialize()
+    app.include_router(create_memory_router(store), prefix="/v1/memory")
+```
+
+See [Endpoints](/docs/api-reference/endpoints) for the full list and examples.

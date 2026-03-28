@@ -1,0 +1,72 @@
+# Quick Start
+
+## Basic usage
+
+```python
+from unforget import MemoryStore
+
+# Connect
+store = MemoryStore("postgresql://unforget:unforget@localhost:5433/unforget")
+await store.initialize()
+
+# Bind to a scope (org + agent)
+memory = store.bind(org_id="my-app", agent_id="assistant")
+
+# Write memories — instant, no LLM
+await memory.write("User prefers dark mode", tags=["preference"])
+await memory.write("User is a Python developer in Tel Aviv", importance=0.8)
+await memory.write("Last deploy failed due to OOM on worker-3", memory_type="event")
+
+# Recall — 4-channel hybrid search
+results = await memory.recall("user preferences")
+for r in results:
+    print(f"[{r.memory_type}] {r.content} (score: {r.score:.3f})")
+
+# List all memories
+all_memories = await memory.list()
+
+# Clean up
+await store.close()
+```
+
+## Memory types
+
+| Type | Purpose | Default importance | Lifespan |
+|------|---------|-------------------|----------|
+| `insight` | Distilled facts, preferences | 0.5 | Long-lived |
+| `event` | Specific interactions | 0.5 | Medium |
+| `raw` | Ingested conversation chunks | 0.3 | 30-day TTL |
+
+## Write-behind pattern
+
+Store raw text instantly, let consolidation promote to insights in the background:
+
+```python
+from unforget import MemoryStore, ConsolidationScheduler
+
+store = MemoryStore("postgresql://...")
+await store.initialize()
+
+# Define an LLM callable for promotion
+async def llm(prompt: str) -> str:
+    # Use any LLM — OpenAI, Anthropic, local, etc.
+    response = await client.messages.create(...)
+    return response.content[0].text
+
+# Attach scheduler
+scheduler = ConsolidationScheduler(
+    store,
+    interval_seconds=60,     # consolidate every 60s
+    write_threshold=10,       # or after 10 writes
+    llm=llm,                  # enables raw → insight promotion
+)
+store.attach_scheduler(scheduler)
+await scheduler.start()
+
+# Now writes are instant — promotion happens async
+memory = store.bind(org_id="my-app", agent_id="bot")
+await memory.write("User said they love hiking in the Golan Heights",
+                    memory_type="raw", importance=0.3)
+# → stored in ~7ms
+# → scheduler promotes to insight like "User enjoys hiking in Golan Heights"
+```

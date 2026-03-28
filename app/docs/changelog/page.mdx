@@ -1,0 +1,30 @@
+{/* This file is auto-updated by CI from the unforget repo's CHANGELOG.md */}
+
+# Changelog
+
+## 0.2.1
+
+- Fix entity extraction for hyphenated tech terms
+- Improve consolidation dedup performance with numpy matmul optimization (144ms → 16ms)
+- Add `recall_cache_ttl` and `recall_cache_size` configuration options
+
+## 0.2.0
+
+- 4-channel hybrid retrieval (semantic + BM25 + entity + temporal)
+- Reciprocal Rank Fusion for result merging
+- Cross-encoder reranking with ms-marco-MiniLM-L-6-v2
+- Background consolidation scheduler with write-threshold triggers
+- LLM-powered promotion from raw → insight
+- OpenAI and Anthropic SDK wrappers
+- FastAPI router with 17 endpoints
+- Memory tools for agent self-management (5 tools)
+- Temporal versioning with supersession chains
+- Multi-tenant scoping with rate limiting and quotas
+
+## 0.1.0
+
+- Initial release
+- Basic write/recall/list/delete operations
+- PostgreSQL + pgvector storage
+- Local ONNX embeddings (all-MiniLM-L6-v2)
+- Importance decay and raw chunk expiry

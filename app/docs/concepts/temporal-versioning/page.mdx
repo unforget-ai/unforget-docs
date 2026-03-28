@@ -1,0 +1,58 @@
+# Temporal Versioning
+
+Unforget tracks how facts change over time using supersession chains.
+
+## Supersede a memory
+
+When a fact changes, supersede the old memory instead of deleting it:
+
+```python
+# Original fact
+m = await memory.write("User lives in Austin, TX")
+
+# 6 months later, they move
+old, new = await memory.supersede(
+    m.id,
+    "User lives in Denver, CO",
+)
+# old.valid_to is set, old.superseded_by = new.id
+```
+
+The old memory is soft-deleted (not destroyed). The new one links back to it.
+
+## Timeline queries
+
+Query what was true at any point in time:
+
+```python
+from datetime import datetime
+
+# What did we know in January?
+january = datetime(2025, 1, 15)
+memories = await memory.timeline(at=january, limit=50)
+# → Returns memories that were valid at that date
+```
+
+## Supersession chains
+
+Follow the full evolution of a fact:
+
+```python
+chain = await memory.supersession_chain(memory_id)
+for m in chain:
+    print(f"{m.valid_from} → {m.valid_to}: {m.content}")
+# 2024-06-01 → 2024-12-15: User lives in Austin, TX
+# 2024-12-15 → None:        User lives in Denver, CO
+```
+
+## Audit trail
+
+Every change is recorded in the `memory_history` table:
+
+```python
+history = await memory.history(memory_id)
+for entry in history:
+    print(f"{entry.action} at {entry.changed_at} by {entry.changed_by}")
+    # created at 2024-06-01 by agent
+    # superseded at 2024-12-15 by agent
+```

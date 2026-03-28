@@ -1,0 +1,35 @@
+# Anthropic Integration
+
+Add persistent memory to Anthropic API calls with one line.
+
+## Setup
+
+```bash
+pip install unforget[anthropic]
+```
+
+## Usage
+
+```python
+from anthropic import AsyncAnthropic
+from unforget import MemoryStore
+from unforget.integrations.anthropic import wrap_anthropic
+
+store = MemoryStore("postgresql://...")
+await store.initialize()
+
+client = wrap_anthropic(
+    AsyncAnthropic(),
+    store,
+    org_id="acme",
+    agent_id="support-bot",
+)
+
+response = await client.messages.create(
+    messages=[{"role": "user", "content": "Help me with my account"}],
+    model="claude-sonnet-4-20250514",
+    max_tokens=1024,
+)
+```
+
+Memory recall, tool injection, and conversation ingestion are handled automatically.

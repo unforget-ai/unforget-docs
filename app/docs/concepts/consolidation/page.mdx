@@ -1,0 +1,79 @@
+# Consolidation
+
+Background maintenance that keeps memories clean, relevant, and deduplicated.
+
+## What it does
+
+Consolidation runs 4 steps in sequence:
+
+### 1. Deduplication
+
+Finds memories with cosine similarity > 0.92 (configurable). Without LLM, keeps the newer/longer one. With LLM, merges both into one concise memory.
+
+### 2. Importance decay
+
+Reduces importance of unaccessed memories:
+- **7+ days** unaccessed: importance × 0.95
+- **30+ days** unaccessed: importance × 0.80
+- **Below 0.1**: soft-deleted
+
+### 3. Raw expiry
+
+Soft-deletes `raw` memories older than 30 days. These are temporary by design — they should be promoted first.
+
+### 4. Promotion (requires LLM)
+
+Distills unconsolidated `raw` memories into `insight` memories:
+
+```
+raw: "user: I just moved to Denver, used to live in Austin"
+raw: "user: I work at Acme Corp as a senior engineer"
+  ↓ LLM distillation
+insight: "User lives in Denver, previously Austin"
+insight: "User is a senior engineer at Acme Corp"
+```
+
+## How to run
+
+### Manual
+
+```python
+report = await store.consolidate(
+    org_id="my-app",
+    agent_id="bot",
+    llm=my_llm_callable,           # optional
+    similarity_threshold=0.92,
+)
+print(f"Merged: {report.duplicates_merged}")
+print(f"Promoted: {report.memories_promoted}")
+```
+
+### Automatic with scheduler
+
+```python
+from unforget import ConsolidationScheduler
+
+scheduler = ConsolidationScheduler(
+    store,
+    interval_seconds=3600,    # every hour
+    write_threshold=50,        # or every 50 writes
+    llm=my_llm_callable,
+)
+store.attach_scheduler(scheduler)
+await scheduler.start()
+```
+
+The scheduler auto-discovers all active agents and consolidates each one.
+
+## LLM callable
+
+Any async function with signature `async (prompt: str) -> str`:
+
+```python
+async def my_llm(prompt: str) -> str:
+    response = await openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content
+```

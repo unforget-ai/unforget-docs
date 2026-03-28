@@ -1,7 +1,12 @@
-import type { NextConfig } from "next";
+import nextra from 'nextra'
 
-const nextConfig: NextConfig = {
-  /* config options here */
-};
+const withNextra = nextra({
+  search: {
+    codeblocks: true,
+  },
+  defaultShowCopyCode: true,
+})
 
-export default nextConfig;
+export default withNextra({
+  reactStrictMode: true,
+})

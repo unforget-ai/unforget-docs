@@ -1,0 +1,43 @@
+# OpenAI Integration
+
+Add persistent memory to OpenAI API calls with one line.
+
+## Setup
+
+```bash
+pip install unforget[openai]
+```
+
+## Usage
+
+```python
+from openai import AsyncOpenAI
+from unforget import MemoryStore
+from unforget.integrations.openai import wrap_openai
+
+store = MemoryStore("postgresql://...")
+await store.initialize()
+
+client = wrap_openai(
+    AsyncOpenAI(),
+    store,
+    org_id="acme",
+    agent_id="support-bot",
+    auto_recall=True,          # inject memories into system prompt
+    auto_ingest=True,          # save conversation after response
+    inject_tools=True,         # add memory tools to tool list
+    inject_instructions=True,  # add memory usage hints
+)
+
+# Use normally — memory is handled transparently
+response = await client.chat.completions.create(
+    messages=[{"role": "user", "content": "What was my last order?"}],
+    model="gpt-4o",
+)
+```
+
+## What happens under the hood
+
+1. **Before the call**: `auto_recall` fetches relevant memories and prepends them to the system prompt
+2. **During the call**: Agent can use `memory_store`, `memory_search`, `memory_list`, `memory_forget`, `memory_update` tools
+3. **After the call**: `auto_ingest` saves the conversation to memory

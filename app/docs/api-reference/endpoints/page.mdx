@@ -1,0 +1,72 @@
+# Endpoints
+
+## All endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/write` | Write a single memory |
+| `POST` | `/write/batch` | Batch write |
+| `POST` | `/recall` | 4-channel search |
+| `POST` | `/auto-recall` | Formatted for system prompt |
+| `POST` | `/ingest` | Ingest conversation |
+| `GET` | `/{memory_id}` | Get single memory |
+| `POST` | `/list` | List with filtering |
+| `PUT` | `/{memory_id}` | Update memory |
+| `DELETE` | `/{memory_id}` | Hard delete |
+| `POST` | `/forget-all` | Delete all for agent |
+| `POST` | `/bulk-delete` | Delete by filters |
+| `POST` | `/supersede/{memory_id}` | Supersede a memory |
+| `POST` | `/timeline` | Query at time T |
+| `POST` | `/chain/{memory_id}` | Supersession chain |
+| `GET` | `/history/{memory_id}` | Audit trail |
+| `POST` | `/stats` | Aggregate stats |
+| `POST` | `/consolidate` | Run consolidation |
+
+## Examples
+
+### Write a memory
+
+```bash
+curl -X POST http://localhost:8000/v1/memory/write \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "User prefers dark mode",
+    "org_id": "acme",
+    "agent_id": "bot",
+    "memory_type": "insight",
+    "tags": ["preference"],
+    "importance": 0.7
+  }'
+```
+
+### Recall memories
+
+```bash
+curl -X POST http://localhost:8000/v1/memory/recall \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "user preferences",
+    "org_id": "acme",
+    "agent_id": "bot",
+    "limit": 5
+  }'
+```
+
+### List memories
+
+```bash
+curl -X POST http://localhost:8000/v1/memory/list \
+  -H "Content-Type: application/json" \
+  -d '{
+    "org_id": "acme",
+    "agent_id": "bot",
+    "memory_type": "insight",
+    "page_size": 20
+  }'
+```
+
+### Delete a memory
+
+```bash
+curl -X DELETE http://localhost:8000/v1/memory/{memory_id}
+```

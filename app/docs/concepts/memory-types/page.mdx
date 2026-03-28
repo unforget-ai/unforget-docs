@@ -1,0 +1,64 @@
+# Memory Types
+
+Every memory has a type that determines its lifecycle, retrieval boost, and consolidation behavior.
+
+## Types
+
+### Insight
+
+Distilled knowledge — facts, preferences, decisions. Long-lived, highest retrieval boost (×1.5).
+
+```python
+await memory.write(
+    "User is allergic to shellfish",
+    memory_type="insight",
+    importance=0.9,
+    tags=["health", "diet"],
+)
+```
+
+### Event
+
+Specific interactions with timestamps. Medium-lived, standard boost (×1.0).
+
+```python
+await memory.write(
+    "Deploy to production failed with OOM error",
+    memory_type="event",
+    tags=["deploy", "incident"],
+)
+```
+
+### Raw
+
+Ingested conversation chunks. Short-lived (30-day TTL), lowest boost (×0.5). Designed to be promoted to insights via consolidation.
+
+```python
+await memory.write(
+    "user: I just moved to Denver from Austin",
+    memory_type="raw",
+    importance=0.3,
+)
+```
+
+## Lifecycle
+
+```
+raw (0.3 importance, 30-day TTL)
+  ↓ consolidation with LLM
+insight (0.6 importance, permanent)
+
+event (0.5 importance)
+  ↓ 7+ days unaccessed: importance × 0.95
+  ↓ 30+ days unaccessed: importance × 0.80
+  ↓ below 0.1: soft-deleted
+```
+
+## Importance
+
+A float between 0.0 and 1.0. Higher importance memories are:
+- Ranked higher in retrieval results
+- Slower to decay during consolidation
+- Last to be soft-deleted
+
+Set importance explicitly or let consolidation adjust it over time.

@@ -1,0 +1,90 @@
+# Memory Tools
+
+5 tools that let LLM agents manage their own memory via tool calling.
+
+## Setup
+
+```python
+from unforget import MemoryStore, MemoryToolExecutor
+
+store = MemoryStore("postgresql://...")
+await store.initialize()
+
+executor = MemoryToolExecutor(store, org_id="acme", agent_id="bot")
+
+# Get tool schemas for your LLM
+openai_tools = executor.to_openai()
+anthropic_tools = executor.to_anthropic()
+generic_tools = executor.to_generic()
+```
+
+## Tools
+
+### memory_store
+
+Save a fact to memory.
+
+```json
+{
+  "content": "User prefers dark mode",
+  "memory_type": "insight",
+  "tags": ["preference", "ui"],
+  "importance": 0.7
+}
+```
+
+### memory_search
+
+Recall relevant memories.
+
+```json
+{
+  "query": "user preferences",
+  "limit": 5
+}
+```
+
+### memory_list
+
+Browse memories by type or tags.
+
+```json
+{
+  "memory_type": "insight",
+  "tags": ["deploy"],
+  "limit": 20
+}
+```
+
+### memory_forget
+
+Remove a memory.
+
+```json
+{
+  "memory_id": "uuid-string"
+}
+```
+
+### memory_update
+
+Update or supersede a memory.
+
+```json
+{
+  "memory_id": "uuid-string",
+  "new_content": "User now prefers light mode"
+}
+```
+
+## Executing tool calls
+
+```python
+# Check if a tool call is a memory tool
+if executor.is_memory_tool_call(tool_name):
+    result = await executor.execute(tool_name, tool_args)
+
+# Or handle full LLM responses
+tool_messages = await executor.handle_openai_response(response)
+tool_messages = await executor.handle_anthropic_response(response)
+```
