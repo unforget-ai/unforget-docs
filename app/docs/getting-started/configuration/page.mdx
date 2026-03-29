@@ -1,91 +1,149 @@
 # Configuration
 
+Unforget works well with defaults — you don't need to configure anything to get started. But when you want to tune performance, swap the embedding model, or adjust retrieval behavior, everything is configurable through the `MemoryStore` constructor.
+
 ## MemoryStore options
 
 ```python
 store = MemoryStore(
     database_url="postgresql://user:pass@localhost/db",
 
-    # Embedding model (default: all-MiniLM-L6-v2, 384 dims, local ONNX)
+    # Embedding model — runs locally, no API keys needed
+    # Default: all-MiniLM-L6-v2 (384 dims, ~3ms with ONNX)
     embedding_model="all-MiniLM-L6-v2",
 
-    # Cross-encoder reranker (adds ~10ms but improves precision)
+    # Cross-encoder reranker — adds ~10ms but significantly improves precision
+    # Disable if you need the lowest possible latency
     reranker_enabled=True,
     reranker_model="cross-encoder/ms-marco-MiniLM-L-6-v2",
 
-    # Connection pool
+    # Connection pool — adjust based on your concurrency needs
     pool_min_size=1,
     pool_max_size=10,
 
     # Retrieval tuning
-    ef_search=100,                # HNSW recall parameter
-    rrf_k=60,                     # Reciprocal Rank Fusion k
+    ef_search=100,    # HNSW recall parameter (higher = more accurate, slower)
+    rrf_k=60,         # Reciprocal Rank Fusion k (lower = more weight on top results)
 
-    # Channel weights for hybrid retrieval
+    # Channel weights — how much each retrieval channel contributes to the final score
     channel_weights={
-        "semantic": 1.0,
-        "bm25": 0.8,
-        "entity": 0.6,
-        "temporal": 0.4,
+        "semantic": 1.0,   # Vector similarity (pgvector cosine)
+        "bm25": 1.0,       # Full-text keyword search
+        "entity": 0.7,     # Named entity overlap (people, places, dates)
+        "temporal": 0.3,   # Recently accessed memories
     },
 
-    # Type boosts applied post-fusion
+    # Type boosts — applied after fusion to favor certain memory types
     type_boosts={
-        "insight": 1.5,
-        "event": 1.0,
-        "raw": 0.5,
+        "insight": 1.5,    # Facts and preferences rank highest
+        "event": 1.0,      # Interactions rank normally
+        "raw": 0.5,        # Raw chunks rank lowest
     },
 
-    # Quotas
-    max_writes_per_minute=100,
-    max_memories_per_agent=10_000,
+    # Quotas — protect against runaway writes
+    max_writes_per_minute=100,     # Per agent
+    max_memories_per_agent=10_000, # Total per agent
 
-    # Recall cache
-    recall_cache_ttl=60.0,
-    recall_cache_size=1000,
+    # Recall cache — repeated queries return instantly
+    recall_cache_ttl=60.0,    # Cache lifetime in seconds
+    recall_cache_size=1000,   # Max cached queries
 )
 ```
 
 ## Custom embedder
+
+The default embedder runs locally — fast and free. If you need higher quality embeddings or want to use a specific provider, swap it out:
+
+### OpenAI embeddings
 
 ```python
 from unforget import MemoryStore, OpenAIEmbedder
 
 store = MemoryStore(
     "postgresql://...",
-    embedder=OpenAIEmbedder(model="text-embedding-3-large"),  # 3072 dims
+    embedder=OpenAIEmbedder(),                                    # text-embedding-3-small
+    # or
+    embedder=OpenAIEmbedder(model="text-embedding-3-large"),      # 3072 dims, higher quality
 )
 ```
 
-Or implement `BaseEmbedder` for any provider:
+### Custom provider
+
+Implement the `BaseEmbedder` interface to use any embedding provider — Cohere, Voyage, a local model, etc:
 
 ```python
 from unforget.embedder import BaseEmbedder
 
-class MyEmbedder(BaseEmbedder):
-    def embed(self, text: str) -> list[float]:
-        ...
-
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        ...
-
+class CohereEmbedder(BaseEmbedder):
     @property
     def dims(self) -> int:
-        return 768
+        return 1024
+
+    def embed(self, text: str) -> list[float]:
+        return cohere_client.embed([text]).embeddings[0]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return cohere_client.embed(texts).embeddings
+
+store = MemoryStore("postgresql://...", embedder=CohereEmbedder())
 ```
 
-## Consolidation scheduler
+The database schema auto-adapts to the embedding dimensionality. Switch embedders and the new dimensions are handled automatically.
+
+## Background consolidation
+
+Consolidation runs in the background to keep your memory store clean and efficient. It handles four tasks:
+
+- **Dedup** — merges near-identical memories (cosine similarity > 0.92)
+- **Decay** — gradually reduces importance of memories that haven't been accessed
+- **Expire** — soft-deletes raw chunks past their 30-day TTL
+- **Promote** — distills raw conversation chunks into clean insights (requires an LLM)
 
 ```python
 from unforget import ConsolidationScheduler
 
+# Define an LLM callable for promotion (optional)
+async def my_llm(prompt: str) -> str:
+    response = await openai_client.chat.completions.create(
+        model="gpt-4.1-nano",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content
+
 scheduler = ConsolidationScheduler(
     store,
-    interval_seconds=3600,       # run every hour
-    write_threshold=50,           # or after 50 writes
-    llm=my_llm_callable,          # optional: enables promotion
-    similarity_threshold=0.92,    # dedup cosine threshold
+    interval_seconds=3600,       # Run every hour
+    write_threshold=50,           # Or after 50 writes, whichever comes first
+    llm=my_llm,                   # Optional: enables raw → insight promotion
+    similarity_threshold=0.92,    # Dedup cosine threshold
 )
 store.attach_scheduler(scheduler)
 await scheduler.start()
+```
+
+Without an LLM, consolidation still handles dedup, decay, and expiry — just not promotion.
+
+## Tuning retrieval
+
+The four retrieval channels each contribute differently depending on your use case:
+
+| Channel | Good for | Weight guidance |
+|---------|---------|-----------------|
+| **Semantic** | Conceptual similarity, paraphrased queries | Keep at 1.0 (anchor) |
+| **BM25** | Exact keyword matches, names, specific terms | Increase for factual Q&A |
+| **Entity** | Queries about specific people, places, dates | Increase for entity-heavy data |
+| **Temporal** | Recent context, "what did we just discuss" | Increase for chat-like applications |
+
+Example: for a customer support bot where exact ticket numbers and product names matter:
+
+```python
+store = MemoryStore(
+    "postgresql://...",
+    channel_weights={
+        "semantic": 1.0,
+        "bm25": 1.2,      # Boost keyword matching
+        "entity": 0.8,     # Product names, ticket IDs
+        "temporal": 0.2,   # Recency less important
+    },
+)
 ```

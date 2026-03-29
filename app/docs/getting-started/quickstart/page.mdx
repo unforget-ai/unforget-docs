@@ -1,72 +1,105 @@
 # Quick Start
 
-## Basic usage
+Let's store some memories and search them. This takes about 30 seconds.
+
+## Connect and write your first memory
 
 ```python
 from unforget import MemoryStore
 
-# Connect
+# Connect to your database
 store = MemoryStore("postgresql://unforget:unforget@localhost:5433/unforget")
 await store.initialize()
 
-# Bind to a scope (org + agent)
+# Bind to a scope — this ties memories to a specific org + agent
 memory = store.bind(org_id="my-app", agent_id="assistant")
 
-# Write memories — instant, no LLM
+# Store some facts — each write takes ~7ms, no LLM calls
 await memory.write("User prefers dark mode", tags=["preference"])
-await memory.write("User is a Python developer in Tel Aviv", importance=0.8)
+await memory.write("User is a Python developer based in Berlin", importance=0.8)
 await memory.write("Last deploy failed due to OOM on worker-3", memory_type="event")
+```
 
-# Recall — 4-channel hybrid search
+That's it — three memories stored in ~21ms total. No LLM processing, no API calls, just a fast embed + SQL insert.
+
+## Search your memories
+
+```python
+# 4-channel hybrid search: semantic + BM25 + entity + temporal
 results = await memory.recall("user preferences")
 for r in results:
     print(f"[{r.memory_type}] {r.content} (score: {r.score:.3f})")
-
-# List all memories
-all_memories = await memory.list()
-
-# Clean up
-await store.close()
 ```
+
+`recall()` runs four search strategies in parallel inside a single SQL query, fuses the results with Reciprocal Rank Fusion, and reranks with a cross-encoder. You get the most relevant memories in ~25ms.
+
+## Inject memories into an LLM prompt
+
+```python
+# Get formatted context ready for a system prompt
+context = await memory.auto_recall("help with deployment")
+print(context)
+# → [Memory Context]
+# → - Last deploy failed due to OOM on worker-3
+# → - User is a Python developer based in Berlin
+```
+
+`auto_recall()` returns a pre-formatted string you can drop directly into your LLM's system prompt. It handles token budgeting so you don't overflow the context window.
 
 ## Memory types
 
-| Type | Purpose | Default importance | Lifespan |
-|------|---------|-------------------|----------|
-| `insight` | Distilled facts, preferences | 0.5 | Long-lived |
-| `event` | Specific interactions | 0.5 | Medium |
-| `raw` | Ingested conversation chunks | 0.3 | 30-day TTL |
+Unforget has three memory types, each designed for a different purpose:
 
-## Write-behind pattern
+| Type | When to use | Default importance | Lifespan |
+|------|------------|-------------------|----------|
+| `insight` | Distilled facts, preferences, rules | 0.5 | Long-lived (default) |
+| `event` | Specific interactions, timestamped happenings | 0.5 | Medium |
+| `raw` | Ingested conversation chunks | 0.3 | Auto-expires after 30 days |
 
-Store raw text instantly, let consolidation promote to insights in the background:
+Most of the time, use `insight` (the default) for facts and `event` for things that happened. The `raw` type is used by the ingestion pipeline and gets promoted to insights by background consolidation.
+
+## Ingest a full conversation
+
+Got a conversation transcript? Ingest it in one call:
 
 ```python
-from unforget import MemoryStore, ConsolidationScheduler
-
-store = MemoryStore("postgresql://...")
-await store.initialize()
-
-# Define an LLM callable for promotion
-async def llm(prompt: str) -> str:
-    # Use any LLM — OpenAI, Anthropic, local, etc.
-    response = await client.messages.create(...)
-    return response.content[0].text
-
-# Attach scheduler
-scheduler = ConsolidationScheduler(
-    store,
-    interval_seconds=60,     # consolidate every 60s
-    write_threshold=10,       # or after 10 writes
-    llm=llm,                  # enables raw → insight promotion
-)
-store.attach_scheduler(scheduler)
-await scheduler.start()
-
-# Now writes are instant — promotion happens async
-memory = store.bind(org_id="my-app", agent_id="bot")
-await memory.write("User said they love hiking in the Golan Heights",
-                    memory_type="raw", importance=0.3)
-# → stored in ~7ms
-# → scheduler promotes to insight like "User enjoys hiking in Golan Heights"
+await memory.ingest([
+    {"role": "user", "content": "My printer won't connect to wifi"},
+    {"role": "assistant", "content": "Let's try resetting the network settings..."},
+    {"role": "user", "content": "That worked! Thanks."},
+], mode="background")
 ```
+
+Three ingestion modes:
+- **`background`** (default) — stores raw chunks instantly, consolidation promotes later. Zero LLM calls.
+- **`immediate`** — LLM extracts key facts upfront. Requires an `llm` callable.
+- **`lightweight`** — NER + heuristics, stores as events. Zero LLM calls.
+
+## Update and version memories
+
+When facts change, supersede the old memory instead of deleting it. This preserves the full history:
+
+```python
+m = await memory.write("User lives in Austin, TX")
+
+# Six months later, they move
+old, new = await memory.supersede(m.id, "User lives in Denver, CO")
+
+# Query what was true at a specific point in time
+january_memories = await memory.timeline(at=datetime(2026, 1, 15))
+# → [MemoryItem(content="User lives in Austin, TX")]
+```
+
+## Clean up
+
+```python
+await store.close()
+```
+
+## Next steps
+
+- [Configuration](/docs/getting-started/configuration) — tune retrieval weights, embedders, and caching
+- [OpenAI Integration](/docs/integrations/openai) — wrap your OpenAI client with automatic memory
+- [Anthropic Integration](/docs/integrations/anthropic) — same for Anthropic
+- [Local MCP Server](/docs/integrations/mcp) — use Unforget with Claude Code or Cursor
+- [OpenClaw Integration](/docs/integrations/openclaw) — add memory to your OpenClaw agent

@@ -1,23 +1,29 @@
 # Installation
 
-## Install the package
+Getting Unforget running takes about 2 minutes. You need Python and PostgreSQL — that's it.
+
+## 1. Install the package
 
 ```bash
 pip install unforget
 ```
 
-### Optional extras
+This gives you the core library with local embedding (no API keys needed). If you want to integrate with a specific LLM provider or add the REST API, grab the extras you need:
 
 ```bash
-pip install unforget[openai]      # OpenAI SDK integration
-pip install unforget[anthropic]   # Anthropic SDK integration
-pip install unforget[api]         # FastAPI REST router
-pip install unforget[spacy]       # Better entity extraction
+pip install unforget[openai]      # Wrap your OpenAI client with memory
+pip install unforget[anthropic]   # Wrap your Anthropic client with memory
+pip install unforget[api]         # Mount a FastAPI router with 17 endpoints
+pip install unforget[spacy]       # Better named entity extraction
 ```
 
-## Start PostgreSQL with pgvector
+You can combine them: `pip install unforget[openai,api]`
 
-The easiest way is Docker:
+## 2. Start PostgreSQL
+
+Unforget uses PostgreSQL with the pgvector extension. If you already have PostgreSQL running, just enable pgvector and skip ahead.
+
+The easiest way to get started is Docker:
 
 ```yaml filename="docker-compose.yml"
 services:
@@ -40,7 +46,16 @@ volumes:
 docker compose up -d
 ```
 
-## Verify
+This starts PostgreSQL 16 with pgvector on port 5433 — data persists across restarts.
+
+**Don't want Docker?** Use `unforget-embed` for an embedded PostgreSQL that requires zero setup:
+
+```bash
+pipx install unforget-embed --python python3.12
+unforget-embed start
+```
+
+## 3. Verify it works
 
 ```python
 from unforget import MemoryStore
@@ -51,4 +66,22 @@ print("Connected!")
 await store.close()
 ```
 
-`initialize()` creates the schema, indexes, and preloads embedding models automatically.
+`initialize()` automatically creates the database schema, builds all the indexes (HNSW for vectors, GIN for full-text search, B-tree for scoping), and preloads the embedding model. First run takes a few seconds while the model downloads; after that, startup is instant.
+
+## What got installed
+
+- **Embedding model** (`all-MiniLM-L6-v2`) — runs locally, 384 dimensions, ~3ms per embedding with ONNX
+- **Cross-encoder reranker** (`ms-marco-MiniLM-L-6-v2`) — reranks search results for better precision
+- **pgvector** — enables fast vector similarity search inside PostgreSQL
+
+No external API calls are made during normal operation. Everything runs on your machine.
+
+## Optional: faster embeddings with ONNX
+
+The default embedding uses PyTorch. For 2-3x faster inference, install ONNX Runtime:
+
+```bash
+pip install onnxruntime
+```
+
+Unforget auto-detects it and switches — no code changes needed.
