@@ -1,0 +1,191 @@
+# OpenClaw Integration
+
+Add long-term memory to your OpenClaw agent. Zero LLM on write. Zero config.
+
+## Install
+
+```bash
+openclaw plugins install @unforget-ai/openclaw
+```
+
+Then install the embedded server (one-time):
+
+```bash
+pipx install unforget-embed --python python3.12
+```
+
+Restart the gateway:
+
+```bash
+openclaw gateway restart
+```
+
+That's it. No API keys, no Docker, no database setup required.
+
+## How It Works
+
+The plugin hooks into OpenClaw's lifecycle:
+
+- **Before each prompt** — retrieves relevant memories and injects them into the agent's context
+- **After each response** — stores the conversation turn as a memory
+- **Forget/Remember** — detects intent and handles it directly (e.g., "forget that I like pizza")
+
+All memory is stored in an embedded PostgreSQL database (via `pgserver`) that starts automatically. Data persists in `~/.unforget/data/`.
+
+## Usage
+
+Just chat normally. Memory is automatic:
+
+```
+You: My name is Alex and I like sushi
+Agent: Got it — I'll remember that, Alex.
+
+/new (new session)
+
+You: What's my name and what food do I like?
+Agent: Your name is Alex and you like sushi.
+
+You: Forget that I like sushi
+Agent: Forgotten.
+
+/new
+
+You: What food do I like?
+Agent: You haven't told me any food preferences.
+```
+
+## Memory Tools
+
+The plugin registers three tools the agent can use directly:
+
+| Tool | Description |
+|------|-------------|
+| `memory_recall` | Search long-term memories |
+| `memory_store` | Save a fact to memory |
+| `memory_forget` | Delete memories by search query |
+
+To enable them, add to your agent config in `openclaw.json`:
+
+```json
+{
+  "agents": {
+    "list": [
+      {
+        "id": "main",
+        "tools": {
+          "alsoAllow": [
+            "memory_recall",
+            "memory_store",
+            "memory_forget"
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+## Configuration
+
+The plugin works with zero config. Optional settings:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "@unforget-ai/openclaw": {
+        "enabled": true,
+        "config": {
+          "orgId": "openclaw",
+          "autoRetain": true,
+          "autoRecall": true,
+          "autoRecallTopK": 10,
+          "debug": false
+        }
+      }
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `orgId` | `"openclaw"` | Organization ID for memory scoping |
+| `agentId` | auto | Agent ID (defaults to OpenClaw agent ID) |
+| `autoRetain` | `true` | Store conversation turns automatically |
+| `autoRecall` | `true` | Inject relevant memories before each prompt |
+| `autoRecallTopK` | `10` | Max memories to inject per prompt |
+| `debug` | `false` | Enable debug logging |
+
+## External Server
+
+If you already have Unforget running or want to use your own PostgreSQL:
+
+```json
+{
+  "config": {
+    "apiUrl": "http://localhost:9077"
+  }
+}
+```
+
+## Architecture
+
+```
+OpenClaw agent
+    │ hooks: before_agent_start, agent_end
+    ▼
+@unforget-ai/openclaw plugin (TypeScript)
+    │ HTTP to localhost:9077
+    ▼
+unforget-embed (auto-started Python daemon)
+    ├── unforget core (4-channel retrieval, embedder, reranker)
+    └── pgserver (embedded PostgreSQL + pgvector)
+```
+
+## Retrieval
+
+Every memory recall runs 4 search channels in parallel:
+
+| Channel | What it does |
+|---------|-------------|
+| **Semantic** | pgvector cosine similarity |
+| **BM25** | PostgreSQL full-text search |
+| **Entity** | Named entity overlap (people, places, dates) |
+| **Temporal** | Recently accessed memories first |
+
+Results are fused with Reciprocal Rank Fusion and reranked with a cross-encoder. One SQL round trip.
+
+## Channels
+
+The plugin works across all OpenClaw channels — Telegram, web UI, CLI, and any other connected channel. Memories are shared across channels for the same agent.
+
+## Troubleshooting
+
+**Plugin not loading?**
+```bash
+tail -f ~/.openclaw/logs/gateway.log | grep -i unforget
+```
+
+**Server not starting?**
+Make sure `unforget-embed` is installed:
+```bash
+pipx install unforget-embed --python python3.12
+```
+
+**Memories not recalling?**
+Enable debug mode in `openclaw.json`:
+```json
+{
+  "config": {
+    "debug": true
+  }
+}
+```
+
+## Links
+
+- [Plugin source](https://github.com/unforget-ai/openclaw-unforget)
+- [npm package](https://www.npmjs.com/package/@unforget-ai/openclaw)
+- [Embedded server](https://github.com/unforget-ai/unforget-embed)
+- [Unforget core](https://github.com/unforget-ai/unforget)
