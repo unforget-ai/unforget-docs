@@ -1,0 +1,119 @@
+# MCP Server (Claude Code, Cursor)
+
+Add long-term memory to Claude Code, Cursor, VS Code Copilot, or any MCP-compatible client.
+
+## Install
+
+```bash
+pipx install unforget-mcp --python python3.12
+```
+
+## Setup
+
+### Claude Code
+
+Add to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "unforget": {
+      "command": "unforget-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+### Cursor
+
+Add to Cursor settings → MCP Servers:
+
+```json
+{
+  "mcpServers": {
+    "unforget": {
+      "command": "unforget-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+### VS Code (Copilot)
+
+Add to `.vscode/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "unforget": {
+      "command": "unforget-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+No API keys. No Docker. No database setup. An embedded PostgreSQL starts automatically.
+
+## Tools
+
+The MCP server exposes 5 tools:
+
+| Tool | Description |
+|------|-------------|
+| `memory_store` | Store a fact, preference, or decision |
+| `memory_search` | Search memories with 4-channel hybrid retrieval |
+| `memory_forget` | Delete memories by query or specific ID |
+| `memory_list` | List all stored memories |
+| `memory_update` | Update a memory with new content (preserves history) |
+
+## Usage Examples
+
+Once configured, your AI assistant can use memory naturally:
+
+```
+You: Remember that this project uses PostgreSQL 16 with pgvector
+Assistant: [calls memory_store] Stored.
+
+--- next session ---
+
+You: What database does this project use?
+Assistant: [calls memory_search] This project uses PostgreSQL 16 with pgvector.
+```
+
+## Options
+
+```bash
+# Embedded mode (default — auto-starts PostgreSQL)
+unforget-mcp
+
+# External database
+unforget-mcp --database-url postgresql://user:pass@localhost/db
+
+# Custom scoping
+unforget-mcp --org-id myproject --agent-id claude
+
+# SSE transport (for remote connections)
+unforget-mcp --transport sse --port 8767
+```
+
+## Architecture
+
+```
+Claude Code / Cursor / MCP Client
+    │ MCP protocol (stdio or SSE)
+    ▼
+unforget-mcp server
+    ├── unforget core (4-channel retrieval, embedder, reranker)
+    └── pgserver (embedded PostgreSQL + pgvector)
+```
+
+Data persists in `~/.unforget/mcp-data/`.
+
+## Links
+
+- [GitHub](https://github.com/unforget-ai/unforget-mcp)
+- [PyPI](https://pypi.org/project/unforget-mcp)
+- [Unforget core](https://github.com/unforget-ai/unforget)
