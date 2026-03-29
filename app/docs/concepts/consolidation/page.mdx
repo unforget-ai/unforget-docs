@@ -1,54 +1,75 @@
 # Consolidation
 
-Background maintenance that keeps memories clean, relevant, and deduplicated.
+Over time, your memory store accumulates duplicates, stale information, and raw conversation chunks. Consolidation is the background process that cleans this up — merging duplicates, fading unused memories, expiring old chunks, and promoting raw data into clean insights.
 
-## What it does
+Think of it as sleep-time compute for your agent's memory. The agent works fast during the day (zero-LLM writes), and consolidation does the heavy lifting in the background.
 
-Consolidation runs 4 steps in sequence:
+## Four operations
 
 ### 1. Deduplication
 
-Finds memories with cosine similarity > 0.92 (configurable). Without LLM, keeps the newer/longer one. With LLM, merges both into one concise memory.
+Finds pairs of memories with cosine similarity above a threshold (default: 0.92). When two memories say essentially the same thing, they get merged.
+
+- **Without LLM**: keeps the longer or newer memory, soft-deletes the other
+- **With LLM**: merges both into a single, more concise memory
+
+Example: "User prefers dark mode" and "The user likes dark mode for all their apps" get merged into one clean memory.
 
 ### 2. Importance decay
 
-Reduces importance of unaccessed memories:
-- **7+ days** unaccessed: importance × 0.95
-- **30+ days** unaccessed: importance × 0.80
-- **Below 0.1**: soft-deleted
+Memories that nobody asks about gradually lose importance:
+
+| Condition | Effect |
+|-----------|--------|
+| Not accessed for 7+ days | importance × 0.95 |
+| Not accessed for 30+ days | importance × 0.80 |
+| Importance drops below 0.1 | Soft-deleted |
+
+This keeps your memory store focused on information that's actually useful. Memories that get recalled regularly maintain their importance automatically.
 
 ### 3. Raw expiry
 
-Soft-deletes `raw` memories older than 30 days. These are temporary by design — they should be promoted first.
+`raw` memories are temporary by design — they're conversation chunks waiting to be processed. After 30 days, unprocessed raw memories are soft-deleted. This prevents the store from growing unboundedly with ingested conversations.
 
 ### 4. Promotion (requires LLM)
 
-Distills unconsolidated `raw` memories into `insight` memories:
+The most interesting step. Promotion takes raw conversation chunks and distills them into clean insight memories:
 
 ```
 raw: "user: I just moved to Denver, used to live in Austin"
 raw: "user: I work at Acme Corp as a senior engineer"
   ↓ LLM distillation
-insight: "User lives in Denver, previously Austin"
+insight: "User lives in Denver (previously Austin)"
 insight: "User is a senior engineer at Acme Corp"
 ```
 
-## How to run
+The LLM reads the raw text, extracts the key facts, and stores them as insights with higher importance. The original raw chunks are marked as consolidated.
 
-### Manual
+Without an LLM, consolidation still handles dedup, decay, and expiry — just not promotion.
+
+## Running consolidation
+
+### Manual trigger
+
+Run consolidation once for a specific agent:
 
 ```python
 report = await store.consolidate(
     org_id="my-app",
     agent_id="bot",
-    llm=my_llm_callable,           # optional
-    similarity_threshold=0.92,
+    llm=my_llm_callable,           # optional — enables promotion
+    similarity_threshold=0.92,     # dedup threshold
 )
-print(f"Merged: {report.duplicates_merged}")
-print(f"Promoted: {report.memories_promoted}")
+
+print(f"Duplicates merged:  {report.duplicates_merged}")
+print(f"Importance decayed: {report.memories_decayed}")
+print(f"Raw expired:        {report.memories_expired}")
+print(f"Promoted to insight:{report.memories_promoted}")
 ```
 
-### Automatic with scheduler
+### Automatic scheduling
+
+For production, attach a scheduler that runs consolidation on a regular cadence:
 
 ```python
 from unforget import ConsolidationScheduler
@@ -56,24 +77,51 @@ from unforget import ConsolidationScheduler
 scheduler = ConsolidationScheduler(
     store,
     interval_seconds=3600,    # every hour
-    write_threshold=50,        # or every 50 writes
-    llm=my_llm_callable,
+    write_threshold=50,        # or after every 50 writes, whichever comes first
+    llm=my_llm_callable,       # optional
 )
 store.attach_scheduler(scheduler)
 await scheduler.start()
 ```
 
-The scheduler auto-discovers all active agents and consolidates each one.
+The scheduler automatically discovers all active agents (by querying distinct org_id/agent_id pairs) and consolidates each one. If an agent has no new data since the last consolidation, it's skipped.
 
-## LLM callable
+Failures are handled with exponential backoff, capped at 1 hour.
 
-Any async function with signature `async (prompt: str) -> str`:
+## The LLM callable
+
+Consolidation accepts any async function with the signature `async (prompt: str) -> str`. Use whatever LLM you prefer:
 
 ```python
+# OpenAI
 async def my_llm(prompt: str) -> str:
     response = await openai_client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4.1-nano",
         messages=[{"role": "user", "content": prompt}],
     )
     return response.choices[0].message.content
+
+# Anthropic
+async def my_llm(prompt: str) -> str:
+    response = await anthropic_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=256,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text
+
+# Local via Ollama
+async def my_llm(prompt: str) -> str:
+    async with httpx.AsyncClient() as client:
+        r = await client.post("http://localhost:11434/api/generate",
+            json={"model": "llama3.2", "prompt": prompt, "stream": False})
+        return r.json()["response"]
 ```
+
+A small, fast model works best for consolidation. The prompts are simple (merge these two texts, extract facts from this chunk) — you don't need a large model.
+
+## When to consolidate
+
+- **High-write apps** (chat bots, support agents): schedule every 30-60 minutes or after every 100 writes
+- **Low-write apps** (personal assistants): once a day is enough
+- **Batch ingestion**: run manually after ingesting a large dataset

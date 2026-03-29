@@ -1,25 +1,31 @@
 # Memory Types
 
-Every memory has a type that determines its lifecycle, retrieval boost, and consolidation behavior.
+Every memory in Unforget has a type that controls how it's stored, how long it lives, and how it ranks in search results. Choosing the right type helps retrieval surface the most useful information.
 
-## Types
+## Three types
 
 ### Insight
 
-Distilled knowledge — facts, preferences, decisions. Long-lived, highest retrieval boost (×1.5).
+The most valuable type. Insights are distilled facts — things you'd want to remember forever. User preferences, biographical facts, decisions, rules. They get the highest retrieval boost (×1.5) and never expire.
 
 ```python
 await memory.write(
     "User is allergic to shellfish",
-    memory_type="insight",
+    memory_type="insight",     # this is the default
     importance=0.9,
     tags=["health", "diet"],
 )
 ```
 
+Good examples of insights:
+- "User prefers dark mode"
+- "The team deploys on Thursdays"
+- "Project uses PostgreSQL 16 with pgvector"
+- "Alice is the frontend lead, Bob handles infrastructure"
+
 ### Event
 
-Specific interactions with timestamps. Medium-lived, standard boost (×1.0).
+Things that happened. Interactions, incidents, milestones — anything with an implicit timestamp. Events get a standard retrieval boost (×1.0) and decay in importance over time if they're not accessed.
 
 ```python
 await memory.write(
@@ -29,36 +35,60 @@ await memory.write(
 )
 ```
 
+Good examples of events:
+- "User reported a bug in the checkout flow"
+- "Migrated the database to the new cluster"
+- "Had a meeting about Q3 roadmap"
+
 ### Raw
 
-Ingested conversation chunks. Short-lived (30-day TTL), lowest boost (×0.5). Designed to be promoted to insights via consolidation.
+Temporary storage for conversation chunks. Raw memories have the lowest retrieval boost (×0.5) and auto-expire after 30 days. They're designed to be a staging area — background consolidation promotes the useful parts into insights and lets the rest fade away.
 
 ```python
 await memory.write(
-    "user: I just moved to Denver from Austin",
+    "user: I just moved to Denver from Austin\nassistant: Welcome to Denver!",
     memory_type="raw",
     importance=0.3,
 )
 ```
 
+You rarely create raw memories directly. The `ingest()` method creates them for you when processing conversation transcripts.
+
+## How types affect retrieval
+
+When you call `recall()`, the 4-channel retrieval scores every matching memory, then multiplies by the type boost:
+
+| Type | Boost | Effect |
+|------|-------|--------|
+| `insight` | ×1.5 | A relevant insight outranks an equally relevant event |
+| `event` | ×1.0 | Baseline ranking |
+| `raw` | ×0.5 | Raw chunks are deprioritized — they're noisy by nature |
+
+This means a partially relevant insight will often rank above a highly relevant raw chunk. The system favors distilled knowledge over raw conversation.
+
 ## Lifecycle
 
-```
-raw (0.3 importance, 30-day TTL)
-  ↓ consolidation with LLM
-insight (0.6 importance, permanent)
+Memories don't just sit there. They evolve over time through consolidation:
 
-event (0.5 importance)
-  ↓ 7+ days unaccessed: importance × 0.95
-  ↓ 30+ days unaccessed: importance × 0.80
-  ↓ below 0.1: soft-deleted
 ```
+raw (importance 0.3, expires in 30 days)
+  ↓ background consolidation with LLM
+insight (importance 0.6, permanent)
+
+event (importance 0.5)
+  ↓ 7+ days without being accessed → importance × 0.95
+  ↓ 30+ days without being accessed → importance × 0.80
+  ↓ importance drops below 0.1 → soft-deleted
+```
+
+This lifecycle ensures your memory store stays clean. Important information gets promoted and preserved. Stale information gradually fades. Temporary chunks expire.
 
 ## Importance
 
-A float between 0.0 and 1.0. Higher importance memories are:
-- Ranked higher in retrieval results
-- Slower to decay during consolidation
-- Last to be soft-deleted
+Every memory has an importance score between 0.0 and 1.0. This affects three things:
 
-Set importance explicitly or let consolidation adjust it over time.
+1. **Retrieval ranking** — higher importance memories score better in search results
+2. **Decay resistance** — important memories take longer to fade during consolidation
+3. **Deletion order** — when cleanup happens, low-importance memories go first
+
+You can set importance explicitly when writing, or let consolidation adjust it based on access patterns. Memories that get recalled frequently have their importance maintained; memories nobody asks about gradually decay.

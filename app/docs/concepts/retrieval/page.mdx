@@ -1,75 +1,125 @@
 # Retrieval
 
-Unforget uses a 4-channel hybrid retrieval system that runs in a single SQL query.
+Unforget doesn't rely on a single search strategy. Every `recall()` fires four different search channels in parallel — semantic similarity, keyword matching, entity overlap, and temporal recency — then fuses the results into a single ranked list. This happens in one SQL round trip.
 
-## Channels
+## The four channels
 
-| Channel | Index | What it finds | Default weight |
-|---------|-------|--------------|----------------|
-| **Semantic** | HNSW (pgvector) | Cosine similarity on embeddings | 1.0 |
-| **BM25** | GIN (tsvector) | Full-text keyword match with stemming | 0.8 |
-| **Entity** | GIN (text[]) | Named entity overlap | 0.6 |
-| **Temporal** | B-tree | Recently accessed memories | 0.4 |
+| Channel | How it works | What it's good at | Index |
+|---------|-------------|-------------------|-------|
+| **Semantic** | Cosine similarity on embeddings | Finding conceptually similar content, even with different words | HNSW (pgvector) |
+| **BM25** | PostgreSQL full-text search with stemming | Exact keyword matches, names, technical terms | GIN (tsvector) |
+| **Entity** | Named entity array overlap | Queries about specific people, places, dates, or products | GIN (text[]) |
+| **Temporal** | Ordered by last access time | "What did we just discuss?" or recent context | B-tree |
 
-All 4 channels run in parallel inside one SQL query using CTEs.
+Each channel returns its top candidates independently. A memory might rank #1 in semantic but #15 in BM25. The fusion step combines these signals.
+
+### Why four channels?
+
+No single search method works for everything. Semantic search is great at "user settings" matching "dark mode preference" but misses exact names. BM25 nails "PostgreSQL 16" but can't handle paraphrases. Entity overlap catches "When did Caroline go camping?" when the semantic embedding doesn't strongly connect "Caroline" to camping. Temporal recency helps with "what were we just talking about?"
+
+By running all four in parallel, Unforget covers gaps that any single method would miss.
 
 ## Reciprocal Rank Fusion (RRF)
 
-Results from all channels are fused using RRF:
+After each channel returns its ranked results, RRF combines them into a single score:
 
 ```
-score = Σ (weight_c / (k + rank_c))
+score(memory) = Σ weight[channel] × (1 / (k + rank[channel]))
 ```
 
-Where `k=60` (configurable) controls how much top ranks dominate.
+A memory that ranks high in multiple channels gets a much higher fused score than one that ranks high in only one channel. The parameter `k` (default: 60) controls how much top ranks dominate — lower k means the #1 result from any channel gets a proportionally bigger boost.
+
+**Example:** A memory that's #2 in semantic and #3 in BM25 will outscore a memory that's #1 in semantic but nowhere in BM25. Consensus across channels is rewarded.
 
 ## Type boosts
 
-After fusion, scores are multiplied by type boosts:
+After fusion, each memory's score is multiplied by its type boost:
 
-- `insight` × 1.5
-- `event` × 1.0
-- `raw` × 0.5
+| Type | Boost | Why |
+|------|-------|-----|
+| `insight` | ×1.5 | Distilled facts are more useful than raw conversation |
+| `event` | ×1.0 | Baseline |
+| `raw` | ×0.5 | Raw chunks are noisy — prefer insights when available |
 
-## Reranking
+## Cross-encoder reranking
 
-Optional cross-encoder reranking with `ms-marco-MiniLM-L-6-v2` adds ~10ms but significantly improves precision for ambiguous queries.
+After the 4-channel fusion produces a candidate list, an optional cross-encoder model (`ms-marco-MiniLM-L-6-v2`) reranks the top results. This adds ~10ms but catches cases where the embedding-based ranking got the order wrong.
+
+The reranker looks at the query-memory pair together (not just the embedding distance) so it understands context better. It's especially helpful for ambiguous queries.
+
+Disable it with `rerank=False` if you need the lowest possible latency.
+
+## The full pipeline
+
+```
+Query
+  ↓
+Embed query (~3ms)
+  ↓
+4-channel SQL CTE (semantic + BM25 + entity + temporal) (~5ms)
+  ↓
+RRF fusion + type boosting
+  ↓
+Cross-encoder reranking (~10ms)
+  ↓
+Deduplicate overlapping results
+  ↓
+Return top-k results (~25ms total)
+```
+
+All of this happens in a single `recall()` call.
 
 ## Usage
 
 ```python
-# Basic recall
+# Basic recall — uses all defaults
 results = await memory.recall("user preferences", limit=10)
 
-# With options
-results = await memory.recall(
-    "deploy issues",
-    limit=5,
-    memory_type="event",      # filter by type
-    include_shared=True,       # include shared memories
-    threshold=0.1,             # minimum score
-    rerank=True,               # enable cross-encoder
-)
+# Filtered by type
+results = await memory.recall("deploy issues", memory_type="event", limit=5)
 
-# Auto-recall formatted for system prompts
-context = await memory.auto_recall(
-    "What does the user prefer?",
-    max_tokens=2000,
-    limit=10,
-)
-# Returns: "[Memory Context]\n- User prefers dark mode\n- ..."
+# Without reranking (faster, slightly less precise)
+results = await memory.recall("recent conversations", rerank=False)
+
+# With a minimum score threshold
+results = await memory.recall("team structure", threshold=0.1)
+
+# Skip cache for fresh results
+results = await memory.recall("latest updates", use_cache=False)
 ```
 
-## Tuning weights
+### Auto-recall for LLM prompts
+
+`auto_recall()` wraps recall with formatting — ready to drop into a system prompt:
 
 ```python
-store = MemoryStore(
-    "postgresql://...",
-    channel_weights={
-        "semantic": 1.0,    # emphasize meaning
-        "bm25": 0.5,        # reduce keyword matching
-        "entity": 0.8,      # boost entity overlap
-        "temporal": 0.2,    # reduce recency bias
-    },
+context = await memory.auto_recall(
+    "What does the user prefer?",
+    max_tokens=2000,    # token budget
+    limit=10,
 )
+# Returns:
+# "[Memory Context]
+# - User prefers dark mode
+# - User is allergic to shellfish
+# - User works in Berlin"
+```
+
+## Tuning
+
+Different use cases benefit from different channel weights. Here are some starting points:
+
+**Customer support** (exact terms matter):
+```python
+channel_weights={"semantic": 1.0, "bm25": 1.2, "entity": 0.8, "temporal": 0.2}
+```
+
+**Personal assistant** (conversational, recency matters):
+```python
+channel_weights={"semantic": 1.0, "bm25": 0.8, "entity": 0.6, "temporal": 0.8}
+```
+
+**Knowledge base** (factual, entity-heavy):
+```python
+channel_weights={"semantic": 1.0, "bm25": 1.0, "entity": 1.0, "temporal": 0.1}
 ```

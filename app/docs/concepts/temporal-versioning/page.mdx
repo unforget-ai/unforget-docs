@@ -1,58 +1,105 @@
 # Temporal Versioning
 
-Unforget tracks how facts change over time using supersession chains.
+Facts change. People move, preferences shift, decisions get revised. Most memory systems just overwrite the old value or pile up duplicates. Unforget handles this with supersession chains — when a fact changes, the old version is preserved and linked to the new one.
 
-## Supersede a memory
+This gives you three things:
+- **Current state** — what's true right now
+- **Point-in-time queries** — what was true on a specific date
+- **Full audit trail** — every change, when it happened, and what the previous value was
 
-When a fact changes, supersede the old memory instead of deleting it:
+## Superseding a memory
+
+When a fact changes, don't delete the old memory. Supersede it:
 
 ```python
-# Original fact
+# January: user lives in Austin
 m = await memory.write("User lives in Austin, TX")
 
-# 6 months later, they move
-old, new = await memory.supersede(
-    m.id,
-    "User lives in Denver, CO",
-)
-# old.valid_to is set, old.superseded_by = new.id
+# July: they move
+old, new = await memory.supersede(m.id, "User lives in Denver, CO")
 ```
 
-The old memory is soft-deleted (not destroyed). The new one links back to it.
+What happens under the hood:
+1. The old memory gets a `valid_to` timestamp (soft-deleted, not destroyed)
+2. The old memory's `superseded_by` field points to the new one
+3. The new memory starts with `valid_from` = now
+4. Both changes are recorded in the audit trail
+
+The old memory no longer appears in `recall()` results — only the current version does.
 
 ## Timeline queries
 
-Query what was true at any point in time:
+Need to know what was true at a specific point in time? Timeline queries return the state of memory as it existed at any date:
 
 ```python
 from datetime import datetime
 
-# What did we know in January?
-january = datetime(2025, 1, 15)
-memories = await memory.timeline(at=january, limit=50)
-# → Returns memories that were valid at that date
+# What did we know in March?
+march = datetime(2026, 3, 15)
+memories = await memory.timeline(at=march, limit=50)
+# → Returns memories that were valid on March 15th
+# → "User lives in Austin, TX" (was still valid then)
 ```
+
+```python
+# What do we know now?
+now_memories = await memory.timeline(at=datetime.now(), limit=50)
+# → "User lives in Denver, CO" (current)
+```
+
+This is especially useful for:
+- Debugging: "what did the agent know when it made that recommendation?"
+- Compliance: "what data did we have about this user on this date?"
+- Analytics: "how has this user's profile changed over time?"
 
 ## Supersession chains
 
-Follow the full evolution of a fact:
+Follow the full evolution of a single fact:
 
 ```python
 chain = await memory.supersession_chain(memory_id)
 for m in chain:
-    print(f"{m.valid_from} → {m.valid_to}: {m.content}")
-# 2024-06-01 → 2024-12-15: User lives in Austin, TX
-# 2024-12-15 → None:        User lives in Denver, CO
+    valid_until = m.valid_to or "present"
+    print(f"{m.valid_from.date()} → {valid_until}: {m.content}")
+
+# 2025-06-01 → 2025-12-15: User lives in Austin, TX
+# 2025-12-15 → 2026-07-01: User lives in Denver, CO
+# 2026-07-01 → present:     User lives in Portland, OR
 ```
+
+The chain is ordered oldest → newest. The last entry (with `valid_to = None`) is the current version.
 
 ## Audit trail
 
-Every change is recorded in the `memory_history` table:
+Every memory change is recorded in the `memory_history` table. This goes beyond supersession — it tracks creates, updates, deletes, and promotions:
 
 ```python
 history = await memory.history(memory_id)
 for entry in history:
     print(f"{entry.action} at {entry.changed_at} by {entry.changed_by}")
-    # created at 2024-06-01 by agent
-    # superseded at 2024-12-15 by agent
+    if entry.old_content:
+        print(f"  was: {entry.old_content}")
+    if entry.new_content:
+        print(f"  now: {entry.new_content}")
 ```
+
+Actions tracked:
+| Action | When |
+|--------|------|
+| `created` | Memory first stored |
+| `updated` | Content, tags, or importance changed |
+| `superseded` | Replaced by a newer version |
+| `deleted` | Soft-deleted (forget, expire, or consolidation) |
+| `promoted` | Raw memory promoted to insight by consolidation |
+
+## When to supersede vs. write new
+
+**Supersede** when the same fact changed:
+- "User lives in Austin" → "User lives in Denver" (same fact, new value)
+- "Preferred language: Python" → "Preferred language: Rust" (preference changed)
+
+**Write new** when it's additional information:
+- "User likes hiking" + "User likes photography" (two separate facts)
+- "Deploy failed on Monday" + "Deploy succeeded on Tuesday" (two separate events)
+
+The rule of thumb: if the new information *replaces* the old, supersede. If it *adds to* it, write new.
