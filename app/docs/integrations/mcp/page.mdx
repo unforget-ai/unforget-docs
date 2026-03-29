@@ -1,18 +1,43 @@
-# MCP Server (Claude Code, Cursor)
+# Local MCP Server
 
-Add long-term memory to Claude Code, Cursor, VS Code Copilot, or any MCP-compatible client.
+Unforget provides a local MCP server that runs entirely on your machine with an embedded PostgreSQL database. No external server, API keys, or database setup required.
 
-## Install
+This is ideal for:
+
+- **Claude Code / Claude Desktop** — give Claude long-term memory across conversations
+- **Cursor** — remember project context, decisions, and preferences
+- **VS Code Copilot** — persistent memory across coding sessions
+- **Any MCP client** — standard MCP protocol over stdio or SSE
+
+## How It Works
+
+Running `unforget-mcp` starts the full Unforget memory system locally:
+
+- Starts an **embedded PostgreSQL** (pgserver) automatically
+- Enables **pgvector** for semantic search
+- Loads **local embedding model** (all-MiniLM-L6-v2) — no API calls needed
+- Exposes **5 memory tools** via MCP protocol
+- Data persists in `~/.unforget/mcp-data/` across restarts
+
+**No LLM calls on write. No API keys. No Docker. Everything runs locally.**
+
+## Setup
+
+### 1. Install the server
 
 ```bash
 pipx install unforget-mcp --python python3.12
 ```
 
-## Setup
+### 2. Connect your MCP client
 
-### Claude Code
+#### Claude Code
 
-Add to your project's `.mcp.json`:
+```bash
+claude mcp add unforget -- unforget-mcp
+```
+
+Or add to your project's `.mcp.json`:
 
 ```json
 {
@@ -25,7 +50,7 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-### Cursor
+#### Cursor
 
 Add to Cursor settings → MCP Servers:
 
@@ -40,7 +65,7 @@ Add to Cursor settings → MCP Servers:
 }
 ```
 
-### VS Code (Copilot)
+#### VS Code (Copilot)
 
 Add to `.vscode/mcp.json`:
 
@@ -55,38 +80,82 @@ Add to `.vscode/mcp.json`:
 }
 ```
 
-No API keys. No Docker. No database setup. An embedded PostgreSQL starts automatically.
+#### Claude Desktop
 
-## Tools
+Add to `claude_desktop_config.json`:
 
-The MCP server exposes 5 tools:
+```json
+{
+  "mcpServers": {
+    "unforget": {
+      "command": "unforget-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+## Available Tools
 
 | Tool | Description |
 |------|-------------|
-| `memory_store` | Store a fact, preference, or decision |
-| `memory_search` | Search memories with 4-channel hybrid retrieval |
-| `memory_forget` | Delete memories by query or specific ID |
-| `memory_list` | List all stored memories |
-| `memory_update` | Update a memory with new content (preserves history) |
+| `memory_store` | Store a fact, preference, or decision to long-term memory |
+| `memory_search` | Search memories using 4-channel hybrid retrieval (semantic + BM25 + entity + temporal) |
+| `memory_forget` | Delete memories by search query or specific ID |
+| `memory_list` | Browse all stored memories, optionally filtered by type |
+| `memory_update` | Update a memory with new content, preserving the version history |
 
-## Usage Examples
+### Tool Details
 
-Once configured, your AI assistant can use memory naturally:
+#### memory_store
 
 ```
-You: Remember that this project uses PostgreSQL 16 with pgvector
-Assistant: [calls memory_store] Stored.
-
---- next session ---
-
-You: What database does this project use?
-Assistant: [calls memory_search] This project uses PostgreSQL 16 with pgvector.
+content: string    — The fact or information to remember
+memory_type: string — "insight" (facts/preferences) or "event" (interactions)
+tags: string[]     — Optional tags for categorization
+importance: float  — 0.0 to 1.0 (default: 0.7)
 ```
+
+#### memory_search
+
+```
+query: string — Natural language search query
+limit: int    — Max results (default: 5)
+```
+
+Uses 4-channel retrieval: semantic similarity, BM25 keyword matching, named entity overlap, and temporal recency. Results are fused with Reciprocal Rank Fusion and reranked with a cross-encoder.
+
+#### memory_forget
+
+```
+query: string     — Search query to find and delete matching memories
+memory_id: string — Or delete a specific memory by UUID
+```
+
+#### memory_list
+
+```
+memory_type: string — Filter: "insight", "event", or "raw"
+limit: int          — Max results (default: 20)
+```
+
+#### memory_update
+
+```
+memory_id: string   — UUID of the memory to update
+new_content: string — Updated content (old version preserved in history)
+```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `UNFORGET_DATABASE_URL` | (embedded) | Override with external PostgreSQL URL |
 
 ## Options
 
 ```bash
-# Embedded mode (default — auto-starts PostgreSQL)
+# Embedded mode (default)
 unforget-mcp
 
 # External database
@@ -95,22 +164,27 @@ unforget-mcp --database-url postgresql://user:pass@localhost/db
 # Custom scoping
 unforget-mcp --org-id myproject --agent-id claude
 
-# SSE transport (for remote connections)
+# SSE transport (for HTTP-based MCP clients)
 unforget-mcp --transport sse --port 8767
 ```
 
-## Architecture
+## Troubleshooting
 
-```
-Claude Code / Cursor / MCP Client
-    │ MCP protocol (stdio or SSE)
-    ▼
-unforget-mcp server
-    ├── unforget core (4-channel retrieval, embedder, reranker)
-    └── pgserver (embedded PostgreSQL + pgvector)
+### Slow first startup
+
+The first startup downloads the embedding model (~90MB) and initializes the database. Subsequent starts are much faster (under 10 seconds).
+
+### Python version
+
+`pgserver` requires Python 3.12 or earlier. If you have a newer Python, specify the version:
+
+```bash
+pipx install unforget-mcp --python python3.12
 ```
 
-Data persists in `~/.unforget/mcp-data/`.
+### Port conflicts
+
+If you're running `unforget-embed` (for OpenClaw) on the default port, the MCP server uses a separate data directory (`~/.unforget/mcp-data/`) so they don't conflict.
 
 ## Links
 
