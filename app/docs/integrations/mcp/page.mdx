@@ -26,7 +26,7 @@ Running `unforget-mcp` starts the full Unforget memory system locally:
 ### 1. Install the server
 
 ```bash
-pipx install unforget-mcp --python python3.12
+pipx install unforget-mcp
 ```
 
 ### 2. Connect your MCP client
@@ -173,14 +173,6 @@ unforget-mcp --transport sse --port 8767
 ### Slow first startup
 
 The first startup downloads the embedding model (~90MB) and initializes the database. Subsequent starts are much faster (under 10 seconds).
-
-### Python version
-
-`pgserver` requires Python 3.12 or earlier. If you have a newer Python, specify the version:
-
-```bash
-pipx install unforget-mcp --python python3.12
-```
 
 ### Port conflicts
 
